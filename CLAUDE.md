@@ -26,6 +26,7 @@ A small data catalog (Python + Streamlit + SQLite, single process) for registeri
 **Domain specifics that span files:**
 - Re-registering an asset with the same name (or `repository.reingest_asset`) keeps the asset id, so all metadata survives; renamed columns are carried over via a `renames` map.
 - Roles (`roles.py`): assignments are one row each, targeting a domain *or* an asset. Effective roles are computed at read time (`effective_assignments`): owners are inherited per responsibility scope (`OWNER_SCOPES`), stewards per role type. Role types are data in `role_types` (to allow a 3rd tier later).
+- Asset status (`asset_status.py`, `assets.status`): 運用中 / 非推奨 / 廃止. It drives behaviour, so it is a fixed-value column rather than a property (admins can rename property choices). Changing it requires `MANAGE_ASSETS`. Retired assets are hidden from the home default, skipped by `incomplete_only`, and not suggested for questions; dependencies on non-active assets produce warnings (`repository.status_warnings`, `questions.hints`), never errors.
 - Completeness (`properties.completeness`) = description + required properties + owner scope coverage + at least one steward. "No questions" is intentionally **not** part of completeness; it's shown as a separate soft indicator.
 - Questions (`questions.py`): only the text is required. Missing details become `hints()` (nudges, never errors). Asset suggestions use character-bigram overlap (no morphological analysis).
 

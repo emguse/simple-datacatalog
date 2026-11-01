@@ -12,6 +12,7 @@ from catalog import auth
 from catalog import roles as _roles
 from catalog import uploads as _uploads
 from catalog import repository as repo
+from catalog.asset_status import ACTIVE, DEPRECATED
 from catalog.auth import Perm, User
 from catalog.db import DEFAULT_DB_PATH, connect, init_db
 from catalog.ingest import FileSchema
@@ -111,7 +112,18 @@ class FormSnapshot:
 
 
 def asset_options(conn: sqlite3.Connection) -> dict[int, str]:
-    return {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM assets ORDER BY name")}
+    """アセット ID → 表示名。選ぶときに気づけるよう、運用中でないものはステータスを添える。"""
+    return {
+        r["id"]: r["name"] if r["status"] == ACTIVE else f"{r['name']}（{r['status']}）"
+        for r in conn.execute("SELECT id, name, status FROM assets ORDER BY name")
+    }
+
+
+def asset_status_badge(status: str) -> str:
+    """運用中でないときのバッジ（運用中は空文字）。"""
+    if status == ACTIVE:
+        return ""
+    return f":{'orange' if status == DEPRECATED else 'gray'}-badge[{status}]"
 
 
 REGISTER_PAGE = "pages/1_登録.py"

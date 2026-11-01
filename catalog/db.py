@@ -18,8 +18,8 @@ DEFAULT_DB_PATH = Path(
 # スキーマの版。
 # - UPGRADABLE_FROM の版: その場で上げる（データは残る）。MIGRATIONS の手順を古い順に流してから SCHEMA を実行する
 # - それ以外の古い版: 退避して作り直す（データは引き継がない）
-SCHEMA_VERSION = 4
-UPGRADABLE_FROM = {2, 3}
+SCHEMA_VERSION = 5
+UPGRADABLE_FROM = {2, 3, 4}
 # MIGRATIONS[v]: 版 v から v+1 に上げるために足す列 (テーブル, 列, 定義)。
 # 新しいテーブルは SCHEMA の CREATE TABLE IF NOT EXISTS で作られる。列が既にあれば何もしない（何度流してもよい）
 MIGRATIONS: dict[int, list[tuple[str, str, str]]] = {
@@ -27,6 +27,9 @@ MIGRATIONS: dict[int, list[tuple[str, str, str]]] = {
     3: [  # v3 → v4: ユーザーにメールアドレスと説明を追加
         ("users", "email", "TEXT NOT NULL DEFAULT ''"),
         ("users", "description", "TEXT NOT NULL DEFAULT ''"),
+    ],
+    4: [  # v4 → v5: アセットにステータスを追加（既存のアセットは運用中になる）
+        ("assets", "status", "TEXT NOT NULL DEFAULT '運用中' CHECK (status IN ('運用中', '非推奨', '廃止'))"),
     ],
 }
 
@@ -49,6 +52,7 @@ CREATE TABLE IF NOT EXISTS assets (
     row_count   INTEGER,
     description TEXT NOT NULL DEFAULT '',
     domain_id   INTEGER REFERENCES domains(id) ON DELETE SET NULL,
+    status      TEXT NOT NULL DEFAULT '運用中' CHECK (status IN ('運用中', '非推奨', '廃止')),
     created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );

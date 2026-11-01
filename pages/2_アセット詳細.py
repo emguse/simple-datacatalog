@@ -14,6 +14,7 @@ from catalog import auth, changelog, roles
 from catalog import questions as qs
 from catalog import properties as props
 from catalog import repository as repo
+from catalog.asset_status import ASSET_STATUSES, DEPRECATED, RETIRED
 from catalog.auth import Perm
 from catalog.ingest import SUPPORTED_EXTENSIONS, infer_schema, preview
 from catalog.ui import (
@@ -71,12 +72,40 @@ def saved(message: str, *snaps: FormSnapshot) -> None:
     st.rerun()
 
 
+# ---- ステータス
+if asset["status"] == RETIRED:
+    st.warning("このデータは廃止されています。維持されていないので、新しい用途には使わないでください。")
+elif asset["status"] == DEPRECATED:
+    st.warning("このデータは非推奨です。新しい利用は避けてください。")
+for w in repo.status_warnings(conn, asset_id):
+    st.warning(w)
+if can_manage:
+    current_status = asset["status"]
+    chosen_status = st.selectbox(
+        "ステータス",
+        ASSET_STATUSES,
+        index=ASSET_STATUSES.index(current_status),
+        key=f"status_{asset_id}_{current_status}",
+        help="廃止にするとホームの既定の一覧から外れ、問いの候補にも出なくなります。あとから戻せます。",
+    )
+    if chosen_status != current_status:
+        try:
+            repo.set_asset_status(conn, user, asset_id, chosen_status)
+        except (ValueError, PermissionError) as e:
+            st.error(str(e))
+        else:
+            saved(f"ステータスを「{chosen_status}」に変更しました")
+else:
+    st.markdown(f"**ステータス**: {asset['status']}")
+
 # ---- 充実度（必須プロパティ＋説明）
 comp = props.completeness(conn, asset_id)
 c1, c2 = st.columns([1, 3])
 c1.markdown(completeness_badge(comp))
 c1.progress(comp.filled / comp.total)
-if comp.missing:
+if asset["status"] == RETIRED:
+    c2.caption("廃止したデータには、必須項目の入力を求めません。")
+elif comp.missing:
     c2.warning("未入力の必須項目: " + "、".join(comp.missing))
 else:
     c2.success("必須項目はすべて入力済みです。")

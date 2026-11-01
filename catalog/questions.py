@@ -14,6 +14,7 @@ import unicodedata
 from datetime import date, timedelta
 
 from catalog import changelog, lineage, roles
+from catalog.asset_status import ACTIVE, RETIRED
 from catalog.auth import Perm, User, require
 from catalog.tx import write_tx
 
@@ -170,7 +171,7 @@ def _attach_assets(conn, q: dict) -> dict:
     q["assets"] = [
         dict(r)
         for r in conn.execute(
-            "SELECT a.id, a.name FROM question_assets qa JOIN assets a ON a.id = qa.asset_id "
+            "SELECT a.id, a.name, a.status FROM question_assets qa JOIN assets a ON a.id = qa.asset_id "
             "WHERE qa.question_id = ? ORDER BY a.name",
             (q["id"],),
         )
@@ -277,6 +278,8 @@ def hints(q: dict, today: date | None = None) -> list[str]:
         out.append("疑問文（〜か？）にすると、何を知りたいかが伝わりやすくなります")
     if not q.get("assets"):
         out.append("答えに使うデータを紐づけると、オーナーとスチュワードが分かります")
+    if unusable := [f"{a['name']}（{a['status']}）" for a in q.get("assets", []) if a["status"] != ACTIVE]:
+        out.append(f"運用中でないデータを使っています: {'、'.join(unusable)}。代わりのデータを検討しましょう")
     if not q["required_quality"]:
         out.append("「必要な品質」（鮮度・粒度・正確性・網羅性など）を書いておくと、受諾の判断がしやすくなります")
     if q["decision"] in ACCEPTED:
@@ -335,18 +338,19 @@ def _asset_document(conn, asset_id: int) -> str:
 def suggest_assets(conn: sqlite3.Connection, text: str, limit: int = 5) -> list[dict]:
     """問いの文に近いアセットの候補（名前・説明・カラム・タグ・プロパティとの文字 bigram の重なり）。
 
-    すでに同じアセットを使っている問いの文も手がかりにする。
+    すでに同じアセットを使っている問いの文も手がかりにする。廃止したアセットは候補にしない。
     """
     q = _bigrams(text)
     if not q:
         return []
     scored = []
-    for r in conn.execute("SELECT id, name FROM assets ORDER BY name").fetchall():
+    for r in conn.execute("SELECT id, name, status FROM assets WHERE status <> ? ORDER BY name", (RETIRED,)).fetchall():
         doc = _asset_document(conn, r["id"])
         doc += " " + " ".join(x["text"] for x in questions_for_asset(conn, r["id"]))
         hit = q & _bigrams(doc)
         if hit:
-            scored.append({"id": r["id"], "name": r["name"], "score": len(hit) / len(q), "matched": sorted(hit)})
+            scored.append({"id": r["id"], "name": r["name"], "status": r["status"], "score": len(hit) / len(q),
+                           "matched": sorted(hit)})
     scored.sort(key=lambda x: (-x["score"], x["name"]))
     return scored[:limit]
 
