@@ -8,7 +8,16 @@ from catalog import repository as repo
 from catalog import roles
 from catalog.ingest import SUPPORTED_EXTENSIONS, detect_format, infer_schema
 from catalog.auth import Perm
-from catalog.ui import DETAIL_PAGE, QUESTIONS_PAGE, require_page, review_changes, schema_table, stage_upload, store_upload
+from catalog.ui import (
+    DETAIL_PAGE,
+    QUESTIONS_PAGE,
+    discard_upload,
+    require_page,
+    review_changes,
+    schema_table,
+    stage_upload,
+    store_upload,
+)
 
 st.title("➕ データ登録")
 st.caption(f"対応形式: {', '.join(sorted(SUPPORTED_EXTENSIONS))}。既存アセットのデータ更新は、アセット詳細ページの「データ更新」からも行えます。")
@@ -24,7 +33,10 @@ with tab_upload:
         "ファイルを選択", type=[e.lstrip(".") for e in SUPPORTED_EXTENSIONS], accept_multiple_files=True
     )
     for f in files or []:
-        candidates.append((Path(f.name).stem, stage_upload(f), True))
+        try:
+            candidates.append((Path(f.name).stem, stage_upload(f), True))
+        except ValueError as e:
+            st.error(f"{f.name}: {e}")
 with tab_local:
     st.caption("ファイルのパスを参照として登録します（ファイルはコピーしません）。ディレクトリを指定すると直下の対応ファイルをすべて対象にします。")
     local = st.text_input("ファイルまたはディレクトリのパス", placeholder="例: sample_data")
@@ -88,12 +100,17 @@ if st.button("登録する", type="primary", disabled=not plans or not all_ok):
     registered_any = False
     for name, path, uploaded, schema, renames, existing in plans:
         if uploaded:
-            path = store_upload(path, name, existing["file_path"] if existing else None)
+            path = store_upload(path, name)
         try:
             result = repo.register_asset(conn, user, name, str(path), schema, renames, domain_id=domain_id)
         except (ValueError, PermissionError) as e:
+            if uploaded:
+                discard_upload(path)  # 登録できなかったので、移したファイルを片付ける
             st.error(f"{name}: {e}")
             continue
+        if uploaded and existing:
+            # DB の更新が済んでから、置き換え前のアップロードファイルを消す
+            discard_upload(existing["file_path"], keep=path)
         verb = "登録" if result.created else "更新"
         st.success(f"{name} を{verb}しました。")
         st.page_link(DETAIL_PAGE, label=f"{name} の詳細を開く", icon="📝", query_params={"id": result.asset_id})

@@ -31,6 +31,7 @@ from catalog.ui import (
     role_editor,
     schema_table,
     selected_asset_id,
+    discard_upload,
     stage_upload,
     store_upload,
 )
@@ -385,7 +386,10 @@ if can_manage:
             "新しいファイル", type=[e.lstrip(".") for e in SUPPORTED_EXTENSIONS], key=f"replace_{asset_id}_{gen}"
         )
         if f is not None:
-            source, uploaded = stage_upload(f), True
+            try:
+                source, uploaded = stage_upload(f), True
+            except ValueError as e:
+                st.error(f"{f.name}: {e}")
 
     if source is not None:
         try:
@@ -401,12 +405,17 @@ if can_manage:
                 schema_table(new_schema)
             renames, ok = review_changes(conn, asset["name"], new_schema, key=f"reingest_{asset_id}")
             if st.button("更新する", type="primary", disabled=not ok, key=f"reingest_btn_{asset_id}"):
-                path = store_upload(source, asset["name"], asset["file_path"]) if uploaded else source
+                path = store_upload(source, asset["name"]) if uploaded else source
                 try:
                     r = repo.reingest_asset(conn, user, asset_id, str(path), new_schema, renames)
                 except (ValueError, PermissionError) as e:
+                    if uploaded:
+                        discard_upload(path)  # 更新できなかったので、移したファイルを片付ける
                     st.error(str(e))
                     st.stop()
+                if uploaded:
+                    # DB の更新が済んでから、置き換え前のアップロードファイルを消す
+                    discard_upload(asset["file_path"], keep=path)
                 parts = [f"{new_schema.row_count:,} 行"]
                 if r.renamed_columns:
                     parts.append("引き継ぎ: " + ", ".join(f"{o} → {n}" for o, n in r.renamed_columns.items()))

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import sqlite3
 from datetime import date
 from pathlib import Path
@@ -11,6 +10,7 @@ import streamlit as st
 
 from catalog import auth
 from catalog import roles as _roles
+from catalog import uploads as _uploads
 from catalog import repository as repo
 from catalog.auth import Perm, User
 from catalog.db import DEFAULT_DB_PATH, connect, init_db
@@ -138,27 +138,18 @@ def selected_asset_id(conn: sqlite3.Connection, user: User | None, label: str = 
 
 
 def stage_upload(uploaded) -> Path:
-    """st.file_uploader で受け取ったファイルを staging に書き出す。"""
-    STAGING_DIR.mkdir(parents=True, exist_ok=True)
-    staged = STAGING_DIR / Path(uploaded.name).name
-    staged.write_bytes(uploaded.getbuffer())
-    return staged
+    """st.file_uploader で受け取ったファイルを、アップロードごとに一意な staging パスに書き出す。"""
+    return _uploads.stage_upload(uploaded, STAGING_DIR)
 
 
-def store_upload(staged: Path, asset_name: str, old_path: str | None = None) -> Path:
-    """staging のファイルを uploads/<アセット名><拡張子> に移す。
+def store_upload(staged: Path, asset_name: str) -> Path:
+    """staging のファイルを uploads/ に移す（ファイル名はアセット名＋一意な接尾辞。古いファイルは消さない）。"""
+    return _uploads.store_upload(staged, asset_name, UPLOAD_DIR)
 
-    置き換え前のファイルが uploads/ 配下にあり、パスが変わる場合は古いファイルを削除する
-    （ローカルパス参照の元ファイルには触らない）。
-    """
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    dest = UPLOAD_DIR / f"{asset_name}{staged.suffix.lower()}"
-    shutil.move(staged, dest)
-    if old_path:
-        old = Path(old_path).resolve()
-        if old != dest.resolve() and old.parent == UPLOAD_DIR.resolve() and old.is_file():
-            old.unlink()
-    return dest
+
+def discard_upload(path, keep=None) -> bool:
+    """uploads/ 直下のファイルだけを削除する。DB の更新が成功してから、置き換え前のファイルに使う。"""
+    return _uploads.discard_upload(path, UPLOAD_DIR, keep=keep)
 
 
 def _normalize(name: str) -> str:
