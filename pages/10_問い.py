@@ -10,6 +10,7 @@ import streamlit as st
 
 from catalog import auth
 from catalog import questions as qs
+from catalog.asset_status import ACTIVE
 from catalog.auth import Perm
 from catalog.ui import (
     DETAIL_PAGE,
@@ -53,8 +54,9 @@ if can_edit:
                     st.markdown(f"- **{q['code']}** {q['text']}　{question_badges(q)}")
             suggestions = qs.suggest_assets(conn, text)
             if suggestions:
-                st.caption("使えそうなデータ: " + "、".join(f"{s['name']}（{'・'.join(s['matched'][:3])}）" for s in suggestions))
-            preselect = [s["id"] for s in suggestions if s["score"] >= 0.3]
+                st.caption("使えそうなデータ: " + "、".join(f"{assets[s['id']]}（{'・'.join(s['matched'][:3])}）" for s in suggestions))
+            # 非推奨のデータは候補に見せるが、最初から選んだ状態にはしない
+            preselect = [s["id"] for s in suggestions if s["score"] >= 0.3 and s["status"] == ACTIVE]
             chosen = st.multiselect(
                 "答えに使うデータ（あとからでも紐づけられます）",
                 list(assets),

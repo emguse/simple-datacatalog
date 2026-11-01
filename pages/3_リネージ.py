@@ -4,6 +4,7 @@ import streamlit as st
 
 from catalog import lineage
 from catalog import questions as qs
+from catalog import repository as repo
 from catalog.auth import Perm
 from catalog.ui import DETAIL_PAGE, require_page, selected_asset_id
 
@@ -19,11 +20,16 @@ depth = c2.slider("たどる深さ", min_value=1, max_value=5, value=2)
 
 graph = lineage.subgraph(conn, asset_id, depth)
 counts = qs.active_question_counts(conn)
-st.graphviz_chart(
-    lineage.to_dot(graph, asset_id, {i: f"❓{counts[i]}" for i in graph.nodes if counts.get(i)}),
-    width="stretch",
+non_active = repo.non_active_statuses(conn)
+notes = {
+    i: " ".join(n for n in (non_active.get(i), f"❓{counts[i]}" if counts.get(i) else None) if n)
+    for i in graph.nodes
+}
+st.graphviz_chart(lineage.to_dot(graph, asset_id, notes), width="stretch")
+st.caption(
+    "❓N は、そのデータが答えている問いの数です。上流のデータは、下流を通じてそれらの問いを支えています。"
+    "運用中でないデータには、ステータス（非推奨・廃止）を添えています。"
 )
-st.caption("❓N は、そのデータが答えている問いの数です。上流のデータは、下流を通じてそれらの問いを支えています。")
 
 ups = lineage.reachable(conn, asset_id, "up", depth)
 downs = lineage.reachable(conn, asset_id, "down", depth)

@@ -1,5 +1,7 @@
 import sqlite3
 
+import pytest
+
 from catalog import auth
 from catalog.db import SCHEMA_VERSION, init_db, open_db
 
@@ -70,3 +72,24 @@ def test_v3_db_gets_user_columns(tmp_path):
     assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     u = auth.authenticate(conn, "admin", "admin-password")
     assert (u.display_name, u.email, u.description) == ("管理者", "", "")
+
+
+def test_v4_db_gets_asset_status(tmp_path):
+    """v4（ステータスの列がない）DB を、データを残したまま v5 に上げる。既存のアセットは運用中になる。"""
+    from catalog import repository as repo
+    from catalog.ingest import ColumnSchema, FileSchema
+
+    path = tmp_path / "catalog.db"
+    conn = open_db(path)
+    admin = auth.create_first_admin(conn, "admin", "", "admin-password")
+    repo.register_asset(conn, admin, "a", "a.csv", FileSchema("csv", 1, [ColumnSchema("x", "int64")]))
+    conn.execute("ALTER TABLE assets DROP COLUMN status")
+    conn.execute("PRAGMA user_version = 4")
+    conn.close()
+
+    assert init_db(path) is None
+    conn = open_db(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert tuple(conn.execute("SELECT name, status FROM assets").fetchone()) == ("a", "運用中")
+    with pytest.raises(sqlite3.IntegrityError):  # 移行後も CHECK 制約が効く
+        conn.execute("UPDATE assets SET status = '不明'")

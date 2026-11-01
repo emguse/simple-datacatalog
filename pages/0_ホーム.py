@@ -5,8 +5,17 @@ import streamlit as st
 from catalog import auth, roles
 from catalog import properties as props
 from catalog import repository as repo
+from catalog.asset_status import ACTIVE, ASSET_STATUSES, DEPRECATED, RETIRED
 from catalog.auth import Perm
-from catalog.ui import DETAIL_PAGE, LINEAGE_PAGE, REGISTER_PAGE, completeness_badge, require_page
+from catalog.ui import (
+    DETAIL_PAGE,
+    LINEAGE_PAGE,
+    REGISTER_PAGE,
+    asset_options,
+    asset_status_badge,
+    completeness_badge,
+    require_page,
+)
 
 st.title("📚 Simple Data Catalog")
 
@@ -32,7 +41,14 @@ domain_ids = [  # 0 =「ドメインなし」（repo には None で渡す）
 ]
 incomplete_only = c2.checkbox("未入力の必須項目があるものだけ")
 stale_roles_only = c3.checkbox("要確認の役割があるものだけ", help=f"最終確認から {roles.STALE_DAYS} 日を過ぎた割り当て")
-no_questions_only = st.checkbox(
+c1, c2 = st.columns(2)
+statuses = c1.multiselect(
+    "ステータス",
+    ASSET_STATUSES,
+    default=[ACTIVE, DEPRECATED],
+    help="既定では廃止したものを隠しています。空にするとすべて表示します",
+)
+no_questions_only = c2.checkbox(
     "答える問いが未登録のものだけ",
     help="どの問いにも使われていないデータは、維持をやめる候補かもしれません。まずは問いを書いてみましょう",
 )
@@ -54,16 +70,22 @@ assets = repo.list_assets(
     domain_ids=domain_ids,
     stale_roles_only=stale_roles_only,
     no_questions_only=no_questions_only,
+    statuses=statuses,
 )
-complete = sum(a["completeness"].complete for a in assets)
+complete = sum(a["completeness"].complete for a in assets if a["status"] != RETIRED)
 st.caption(f"{len(assets)} 件（必須項目がすべて入力済み: {complete} 件）")
 
-filtering = (query or tags or incomplete_only or stale_roles_only or no_questions_only or domain_ids
-             or any(property_filters.values()))
 if not assets:
-    st.info("該当するアセットはありません。" if filtering else "まだアセットが登録されていません。")
-    if not filtering and auth.can(user, Perm.MANAGE_ASSETS):
-        st.page_link(REGISTER_PAGE, label="登録ページへ", icon="➕")
+    # 絞り込みの有無ではなく実際の件数で判定する（既定で廃止を隠すので、全件廃止でも結果が空になる）
+    registered = bool(asset_options(conn))
+    if not registered:
+        st.info("まだアセットが登録されていません。")
+        if auth.can(user, Perm.MANAGE_ASSETS):
+            st.page_link(REGISTER_PAGE, label="登録ページへ", icon="➕")
+    elif statuses and RETIRED not in statuses:
+        st.info("該当するアセットはありません（廃止したものは、ステータスの絞り込みで表示できます）。")
+    else:
+        st.info("該当するアセットはありません。")
 
 for a in assets:
     comp = a["completeness"]
@@ -75,8 +97,10 @@ for a in assets:
         head.caption(f"{a['format']} ・ {a['row_count']:,} 行 ・ {a['column_count']} カラム ・ {updated}")
         n_q = a["question_count"]
         q_badge = f":violet-badge[❓ 答える問い {n_q}件]" if n_q else ":gray-badge[問い未登録]"
-        badges = [completeness_badge(comp), q_badge] + [f":blue-badge[{t}]" for t in a["tags"]]
-        head.markdown(" ".join(badges))
+        retired = a["status"] == RETIRED
+        badges = [asset_status_badge(a["status"]), "" if retired else completeness_badge(comp), q_badge]
+        badges += [f":blue-badge[{t}]" for t in a["tags"]]
+        head.markdown(" ".join(b for b in badges if b))
         head.markdown(
             f"**ドメイン**: {a['domain_name'] or '—'} ・ **オーナー**: {'、'.join(a['owners']) or '—'} ・ "
             f"**スチュワード**: {'、'.join(a['stewards']) or '—'}"
@@ -84,7 +108,7 @@ for a in assets:
         )
         head.markdown(" ・ ".join(f"**{d.name}**: {a['properties'].get(d.name, '—')}" for d in HIGHLIGHT))
         head.write(a["description"] or "_（説明なし）_")
-        if comp.missing:
+        if comp.missing and not retired:
             head.caption("未入力: " + "、".join(comp.missing))
         links.page_link(DETAIL_PAGE, label="詳細", icon="📝", query_params={"id": a["id"]})
         links.page_link(LINEAGE_PAGE, label="リネージ", icon="🔀", query_params={"id": a["id"]})

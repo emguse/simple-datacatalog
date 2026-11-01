@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from catalog import changelog, lineage, properties, questions, roles
+from catalog.asset_status import ACTIVE, ASSET_STATUSES, RETIRED
 from catalog.auth import Perm, User, require
 from catalog.ingest import FileSchema
 from catalog.tx import write_tx
@@ -120,7 +121,7 @@ def register_asset(
 
     domain_id は新規登録のときだけ使う（再取込ではドメインを変えない。付け替えは roles.set_asset_domain）。
 
-    同名のアセットが既にあれば再取込として扱い、アセット ID・説明・タグ・プロパティ・リネージを保つ。
+    同名のアセットが既にあれば再取込として扱い、アセット ID・説明・タグ・プロパティ・リネージ・ステータスを保つ。
     同じ名前のカラムと、renames（旧名 → 新名）で対応付けたカラムは説明・タグを引き継ぐ。
     差分の計算から書き込みまでを1つのトランザクションで行う。
     """
@@ -279,6 +280,56 @@ def update_asset_metadata(
             conn.execute("UPDATE assets SET updated_at = datetime('now', 'localtime') WHERE id = ?", (asset_id,))
 
 
+def set_asset_status(conn: sqlite3.Connection, actor: User, asset_id: int, status: str) -> None:
+    """ステータスを変える。維持をやめる判断にあたるので、説明などの編集より強い権限を求める。"""
+    require(actor, Perm.MANAGE_ASSETS)
+    if status not in ASSET_STATUSES:
+        raise ValueError(f"ステータスは {' / '.join(ASSET_STATUSES)} のいずれかです")
+    with write_tx(conn):
+        row = get_asset(conn, asset_id)
+        if row is None:
+            raise ValueError("アセットが削除されています")
+        if row["status"] == status:
+            return
+        conn.execute(
+            "UPDATE assets SET status = ?, updated_at = datetime('now', 'localtime') WHERE id = ?",
+            (status, asset_id),
+        )
+        changelog.log(conn, actor, "asset", "update", asset_id=asset_id, target="ステータス",
+                      old=row["status"], new=status)
+
+
+def non_active_statuses(conn: sqlite3.Connection) -> dict[int, str]:
+    """運用中でないアセットの ID → ステータス。"""
+    return {r[0]: r[1] for r in conn.execute("SELECT id, status FROM assets WHERE status <> ?", (ACTIVE,))}
+
+
+def status_warnings(conn: sqlite3.Connection, asset_id: int) -> list[str]:
+    """ステータスに関わる依存関係の注意。
+
+    - このアセットが運用中でないのに、有効な問いや下流のアセットが使っている
+    - このアセットの上流（間接を含む）に、運用中でないアセットがある（廃止したアセット自身には出さない）
+    """
+    row = get_asset(conn, asset_id)
+    if row is None:
+        return []
+    non_active = non_active_statuses(conn)
+    names = {r[0]: r[1] for r in conn.execute("SELECT id, name FROM assets")}
+    out = []
+    if row["status"] != ACTIVE:
+        if n := questions.active_question_counts(conn).get(asset_id):
+            out.append(f"有効な問い {n} 件がこのデータを使っています。問いの見直しや、代わりのデータの案内が必要です。")
+        users = [i for i in lineage.reachable(conn, asset_id, "down") if non_active.get(i) != RETIRED]
+        if users:
+            out.append("下流のデータがこのデータに依存しています: " + "、".join(sorted(names[i] for i in users)))
+    if row["status"] != RETIRED:
+        ups = [i for i in lineage.reachable(conn, asset_id, "up") if i in non_active]
+        if ups:
+            labels = sorted(f"{names[i]}（{non_active[i]}）" for i in ups)
+            out.append("上流に運用中でないデータがあります: " + "、".join(labels))
+    return out
+
+
 def asset_tags(conn: sqlite3.Connection, asset_id: int) -> list[str]:
     return [
         r[0]
@@ -299,13 +350,15 @@ def list_assets(
     domain_ids=None,
     stale_roles_only: bool = False,
     no_questions_only: bool = False,
+    statuses=(),
 ) -> list[dict]:
     """アセット一覧を絞り込んで返す。
 
     - query: 名前・説明・カラム名・カラム説明・プロパティ値の部分一致
     - tags: すべてのタグを含む（アセットまたはカラムのタグ）
     - property_filters: プロパティ ID → 値のリスト（項目間は AND、値の間は OR）
-    - incomplete_only: 必須項目に未入力があるものだけ
+    - incomplete_only: 必須項目に未入力があるものだけ（廃止したものは入力を求めないので含めない）
+    - statuses: ステータスのリスト。空なら絞り込まない
     - domain_ids: ドメイン ID のリスト（None を含めると「ドメインなし」も対象）。空なら絞り込まない
     - stale_roles_only: 最終確認が古い（要確認の）割り当てが効いているものだけ
     - no_questions_only: 答える（有効な）問いが1件もないものだけ（維持をやめる候補）
@@ -355,6 +408,9 @@ def list_assets(
         if None in domain_ids:
             conds.append("a.domain_id IS NULL")
         sql += " AND (" + " OR ".join(conds) + ")"
+    if statuses:
+        sql += f" AND a.status IN ({','.join('?' * len(statuses))})"
+        params += list(statuses)
     sql += " ORDER BY a.name"
     defs = properties.list_definitions(conn)
     names = {d.id: d.name for d in defs}
@@ -364,7 +420,7 @@ def list_assets(
         if no_questions_only and q_counts.get(r["id"]):
             continue
         comp = properties.completeness(conn, r["id"], defs)
-        if incomplete_only and comp.complete:
+        if incomplete_only and (comp.complete or r["status"] == RETIRED):
             continue
         effective = roles.effective_assignments(conn, r["id"])
         stale = sum(a["stale"] for a in effective)
