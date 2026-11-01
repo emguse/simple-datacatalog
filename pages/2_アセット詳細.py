@@ -410,12 +410,12 @@ if can_manage:
                     r = repo.reingest_asset(conn, user, asset_id, str(path), new_schema, renames)
                 except (ValueError, PermissionError) as e:
                     if uploaded:
-                        discard_upload(path)  # 更新できなかったので、移したファイルを片付ける
+                        discard_upload(conn, path)  # 更新できなかったので、移したファイルを片付ける
                     st.error(str(e))
                     st.stop()
                 if uploaded:
                     # DB の更新が済んでから、置き換え前のアップロードファイルを消す
-                    discard_upload(asset["file_path"], keep=path)
+                    discard_upload(conn, asset["file_path"], keep=path)
                 parts = [f"{new_schema.row_count:,} 行"]
                 if r.renamed_columns:
                     parts.append("引き継ぎ: " + ", ".join(f"{o} → {n}" for o, n in r.renamed_columns.items()))

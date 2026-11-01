@@ -134,3 +134,17 @@ def test_reingest_keeps_asset_metadata_and_lineage(conn, admin):
     assert (row["file_path"], row["format"], row["row_count"], row["description"]) == ("b2.parquet", "parquet", 99, "説明")
     assert repo.asset_tags(conn, b) == ["t"]
     assert repo.direct_upstreams(conn, b) == [a]
+
+
+def test_assets_referencing_file(conn, admin, tmp_path):
+    """置き換え前のファイルを、別のアセットが参照していれば消さない（PR #1 のレビュー指摘）。"""
+    f = tmp_path / "uploads" / "a-123.csv"
+    f.parent.mkdir()
+    f.write_text("x\n1\n")
+    repo.register_asset(conn, admin, "a", str(f), schema("x"))
+    # 同じファイルを、パスの書き方を変えてローカルパス指定で別アセットとして登録
+    repo.register_asset(conn, admin, "b", str(tmp_path / "uploads" / ".." / "uploads" / "a-123.csv"), schema("x"))
+    assert repo.assets_referencing_file(conn, f) == ["a", "b"]
+    repo.reingest_asset(conn, admin, repo.get_asset_by_name(conn, "a")["id"], str(tmp_path / "new.csv"), schema("x"))
+    assert repo.assets_referencing_file(conn, f) == ["b"]  # a を置き換えても b が参照している
+    assert repo.assets_referencing_file(conn, tmp_path / "nothing.csv") == []

@@ -105,12 +105,12 @@ if st.button("登録する", type="primary", disabled=not plans or not all_ok):
             result = repo.register_asset(conn, user, name, str(path), schema, renames, domain_id=domain_id)
         except (ValueError, PermissionError) as e:
             if uploaded:
-                discard_upload(path)  # 登録できなかったので、移したファイルを片付ける
+                discard_upload(conn, path)  # 登録できなかったので、移したファイルを片付ける
             st.error(f"{name}: {e}")
             continue
         if uploaded and existing:
             # DB の更新が済んでから、置き換え前のアップロードファイルを消す
-            discard_upload(existing["file_path"], keep=path)
+            discard_upload(conn, existing["file_path"], keep=path)
         verb = "登録" if result.created else "更新"
         st.success(f"{name} を{verb}しました。")
         st.page_link(DETAIL_PAGE, label=f"{name} の詳細を開く", icon="📝", query_params={"id": result.asset_id})

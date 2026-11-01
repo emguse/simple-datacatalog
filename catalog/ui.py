@@ -147,8 +147,14 @@ def store_upload(staged: Path, asset_name: str) -> Path:
     return _uploads.store_upload(staged, asset_name, UPLOAD_DIR)
 
 
-def discard_upload(path, keep=None) -> bool:
-    """uploads/ 直下のファイルだけを削除する。DB の更新が成功してから、置き換え前のファイルに使う。"""
+def discard_upload(conn: sqlite3.Connection, path, keep=None) -> bool:
+    """uploads/ 直下のファイルで、どのアセットからも参照されていないものだけを削除する。
+
+    DB の更新が成功してから、置き換え前のファイル（または登録に失敗したときに移したファイル）に使う。
+    同じファイルをローカルパス指定で登録した別のアセットがあれば、消さずに残す。
+    """
+    if not path or repo.assets_referencing_file(conn, path):
+        return False
     return _uploads.discard_upload(path, UPLOAD_DIR, keep=keep)
 
 

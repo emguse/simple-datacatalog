@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from catalog import changelog, lineage, properties, questions, roles
 from catalog.auth import Perm, User, require
@@ -202,6 +203,20 @@ def reingest_asset(
     if row is None:
         raise ValueError(f"アセット {asset_id} は存在しません")
     return register_asset(conn, actor, row["name"], file_path, schema, renames)
+
+
+def assets_referencing_file(conn: sqlite3.Connection, path) -> list[str]:
+    """このファイルを参照しているアセット名（パスは解決してから比べる）。
+
+    アップロード先のファイルは、ローカルパス指定で別のアセットとしても登録できるため、
+    置き換え前のファイルを消す前にこれで確かめる。
+    """
+    target = Path(path).resolve()
+    return [
+        r["name"]
+        for r in conn.execute("SELECT name, file_path FROM assets ORDER BY name")
+        if Path(r["file_path"]).resolve() == target
+    ]
 
 
 def delete_asset(conn: sqlite3.Connection, actor: User, asset_id: int) -> None:
