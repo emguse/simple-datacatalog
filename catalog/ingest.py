@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 SUPPORTED_EXTENSIONS = {
@@ -49,10 +50,19 @@ def _read_frame(path: Path, fmt: str, nrows: int | None = None) -> pd.DataFrame:
     if fmt == "csv":
         return pd.read_csv(path, nrows=nrows)
     if fmt == "parquet":
-        df = pd.read_parquet(path)
-        return df.head(nrows) if nrows is not None else df
-    if fmt in ("json", "jsonl"):
-        df = pd.read_json(path, lines=(fmt == "jsonl"), dtype=False)  # 値どおりの型を保つ（9200.0 を int にしない）
+        if nrows is None:
+            return pd.read_parquet(path)
+        # 先頭のバッチだけを読む（ファイル全体をメモリに載せない）
+        pf = pq.ParquetFile(path)
+        first = next(pf.iter_batches(batch_size=nrows), None)
+        table = pa.Table.from_batches([first]) if first is not None else pf.schema_arrow.empty_table()
+        return table.to_pandas()
+    if fmt == "jsonl":
+        # nrows を渡すと先頭の行だけを読む。dtype=False: 値どおりの型を保つ（9200.0 を int にしない）
+        return pd.read_json(path, lines=True, dtype=False, nrows=nrows)
+    if fmt == "json":
+        # 1つの JSON 配列は、ストリーミング解析なしでは途中までだけ読むことができないため全体を読む
+        df = pd.read_json(path, dtype=False)
         return df.head(nrows) if nrows is not None else df
     raise UnsupportedFormatError(fmt)
 

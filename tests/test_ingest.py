@@ -67,3 +67,32 @@ def test_json_keeps_float_type(tmp_path):
     p.write_text('{"n": 1, "amount": 9200.0}\n{"n": 2, "amount": 10.0}\n')
     types = {c.name: c.data_type for c in infer_schema(p).columns}
     assert types == {"n": "int64", "amount": "float64"}
+
+
+def test_parquet_preview_reads_only_first_batch(tmp_path, monkeypatch):
+    """プレビューで Parquet 全体を読まない（PR #1 のレビュー指摘）。"""
+    p = tmp_path / "big.parquet"
+    pd.DataFrame({"i": range(1000), "s": [f"v{i}" for i in range(1000)]}).to_parquet(p, index=False, row_group_size=100)
+
+    def full_read(*a, **kw):
+        raise AssertionError("ファイル全体を読んでいる")
+
+    monkeypatch.setattr(pd, "read_parquet", full_read)
+    df = preview(p, n=20)
+    assert list(df.columns) == ["i", "s"] and list(df["i"]) == list(range(20))
+
+
+def test_parquet_preview_of_empty_file(tmp_path):
+    p = tmp_path / "empty.parquet"
+    pd.DataFrame({"i": pd.Series([], dtype="int64")}).to_parquet(p, index=False)
+    df = preview(p)
+    assert list(df.columns) == ["i"] and len(df) == 0
+
+
+def test_jsonl_preview_reads_only_first_lines(tmp_path):
+    """先頭の行だけを読むので、後ろに壊れた行があってもプレビューできる（全体を読んでいない証拠）。"""
+    p = tmp_path / "big.jsonl"
+    lines = [json.dumps({"k": i, "amount": 1.5}) for i in range(100)] + ["{broken"]
+    p.write_text("\n".join(lines))
+    df = preview(p, n=20)
+    assert len(df) == 20 and list(df["k"]) == list(range(20)) and str(df["amount"].dtype) == "float64"
