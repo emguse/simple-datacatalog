@@ -198,11 +198,17 @@ def reingest_asset(
     schema: FileSchema,
     renames: dict[str, str] | None = None,
 ) -> RegisterResult:
-    """既存アセットを ID 指定で更新する（メタデータは register_asset と同じルールで引き継ぐ）。"""
-    row = get_asset(conn, asset_id)
-    if row is None:
-        raise ValueError(f"アセット {asset_id} は存在しません")
-    return register_asset(conn, actor, row["name"], file_path, schema, renames)
+    """既存アセットを ID 指定で更新する（メタデータは register_asset と同じルールで引き継ぐ）。
+
+    ID から名前を引く確認と更新を1つのトランザクションで行う。分けると、その間に別のセッションが
+    削除したアセットを新しい ID で作り直したり、同じ名前で登録し直された別のアセットを上書きしたりする。
+    """
+    require(actor, Perm.MANAGE_ASSETS)
+    with write_tx(conn):  # register_asset の write_tx はこのトランザクションに相乗りする
+        row = get_asset(conn, asset_id)
+        if row is None:
+            raise ValueError(f"アセット {asset_id} は存在しません")
+        return register_asset(conn, actor, row["name"], file_path, schema, renames)
 
 
 def assets_referencing_file(conn: sqlite3.Connection, path) -> list[str]:

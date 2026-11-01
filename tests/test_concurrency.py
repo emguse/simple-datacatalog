@@ -98,3 +98,34 @@ def test_concurrent_writes_all_applied(conn, db_path, admin):
     values = props.get_asset_properties(conn, a)
     assert all(values[defs[i]] == f"v{i}-4" for i in range(8))
     assert len(repo.asset_tags(conn, a)) == 40
+
+
+def test_reingest_lookup_and_update_are_atomic(conn, db_path, admin, monkeypatch):
+    """ID の確認から更新までを1つのトランザクションで行う（PR #1 のレビュー指摘）。
+
+    確認の直後に別のセッションが削除しようとしても、更新が終わるまで待たされ、
+    削除済みのアセットを新しい ID で作り直すことはない。
+    """
+    import sqlite3
+
+    import pytest
+
+    a = repo.register_asset(conn, admin, "a", "a.csv", S).asset_id
+    other = connect(db_path)
+    other.execute("PRAGMA busy_timeout = 0")  # 待たずにすぐ失敗させる
+    real_get_asset = repo.get_asset
+    attempts = []
+
+    def get_asset_then_concurrent_delete(c, asset_id):
+        row = real_get_asset(c, asset_id)
+        if not attempts:
+            attempts.append(True)
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                repo.delete_asset(other, admin, asset_id)
+        return row
+
+    monkeypatch.setattr(repo, "get_asset", get_asset_then_concurrent_delete)
+    r = repo.reingest_asset(conn, admin, a, "a2.csv", FileSchema("csv", 9, [ColumnSchema("x", "int64")]))
+    monkeypatch.undo()
+    assert attempts and r.asset_id == a and not r.created
+    assert [(row["id"], row["file_path"]) for row in conn.execute("SELECT id, file_path FROM assets")] == [(a, "a2.csv")]
