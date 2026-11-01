@@ -1,0 +1,20 @@
+[project]
+name = "simple-datacatalog"
+version = "0.1.0"
+description = "手元のサンプルデータを登録して説明・タグ・リネージを管理する簡易データカタログ"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.40",
+    "pandas>=2.2",
+    "pyarrow>=17",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
