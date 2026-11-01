@@ -6,19 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A small data catalog (Python + Streamlit + SQLite, single process) for registering local data files (CSV / Parquet / JSON / JSONL) and managing descriptions, tags, properties, lineage, data owner / steward roles, and "questions" (問い) that the data answers. UI text, docs, comments and commit messages are in Japanese. Design background: `docs/question-driven.md` (roles and the question-driven approach), `docs/plan.md` (implemented design), `README.md` (usage).
 
-## Commands
-
-```bash
-uv sync                                   # install deps (Python >= 3.11; uv-managed, package = false)
-uv run streamlit run app.py               # run the app (entrypoint is the router app.py)
-uv run pytest                             # all tests
-uv run pytest tests/test_roles.py::test_inheritance_matches_docs_example   # single test
-uv run python scripts/make_sample_data.py # regenerate sample_data/
-CATALOG_DB=/tmp/x/catalog.db uv run streamlit run app.py  # use another DB (uploads go to <db dir>/uploads/)
-```
-
-No linter/formatter is configured. Tests use a temp file DB per test (`tests/conftest.py`) with role fixtures `admin` / `power` / `editor` / `viewer`.
-
 ## Architecture
 
 **Layers**: `pages/*.py` (Streamlit UI) → `catalog/ui.py` (shared widgets/helpers) → domain modules in `catalog/` (`repository`, `properties`, `roles`, `questions`, `lineage`, `auth`, `changelog`) → `catalog/db.py` / `catalog/tx.py`. Domain modules never import Streamlit; keep business rules there so they are testable.
@@ -46,5 +33,6 @@ No linter/formatter is configured. Tests use a temp file DB per test (`tests/con
 
 ## Testing notes
 
+- Tests use a temp file DB per test (`tests/conftest.py`) with role fixtures `admin` / `power` / `editor` / `viewer`.
 - Concurrency behaviour is tested with multiple `connect(db_path)` connections and threads (`tests/test_concurrency.py`).
 - UI flows have been verified with `streamlit.testing.v1.AppTest` (run via `app.py` with `at.session_state["user_id"] = ...` and `at.switch_page(...)`); these scripts are not in the repo. AppTest cannot enter new values into `accept_new_options` selectboxes, so seed suggestions via the API first.
