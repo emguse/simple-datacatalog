@@ -80,6 +80,13 @@ def test_custom_crud(conn, admin):
         ("number", "1,000", "1000"),
         ("number", "1.50", "1.5"),
         ("number", "-3", "-3"),
+        # float を通さないので精度が落ちない（PR #1 のレビュー指摘）
+        ("number", "9007199254740993", "9007199254740993"),
+        ("number", "12345678901234567890.123456789", "12345678901234567890.123456789"),
+        ("number", "10.0", "10"),
+        ("number", "1e3", "1000"),
+        ("number", "1.5e-3", "0.0015"),
+        ("number", "-0.0", "0"),
         ("date", "2026-11-01", "2026-11-01"),
         ("date", date(2026, 1, 2), "2026-01-02"),
         ("select", "日次", "日次"),
@@ -94,7 +101,7 @@ def test_normalize_ok(type_, raw, expected):
 
 @pytest.mark.parametrize(
     "type_,raw",
-    [("number", "abc"), ("number", "1-2"), ("date", "2026/11/01"), ("select", "週次"), ("url", "example.com")],
+    [("number", "abc"), ("number", "1-2"), ("number", "1e309"), ("number", "1e-100"), ("date", "2026/11/01"), ("select", "週次"), ("url", "example.com")],
 )
 def test_normalize_ng(type_, raw):
     d = props.PropertyDef(1, "p", type_, choices=["日次"])

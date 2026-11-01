@@ -11,6 +11,7 @@ import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import Decimal, InvalidOperation
 
 from catalog import changelog, roles
 from catalog.auth import Perm, User, require
@@ -230,6 +231,34 @@ def delete_definition(conn: sqlite3.Connection, actor: User, def_id: int) -> Non
 _NUMBER = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
 
 
+MAX_NUMBER_DIGITS = 60  # 保存する数値の桁数の上限（整数部＋小数部）
+
+
+def _normalize_number(name: str, raw: str, v: str) -> str:
+    """数値を Decimal で正確に正規化する（float を通すと 2**53 を超える整数や長い小数の精度が落ちるため）。
+
+    指数表記は展開し、小数部の末尾の 0 は取り除く（"1.50" → "1.5"、"1e3" → "1000"）。
+    有限でない値と、展開すると MAX_NUMBER_DIGITS 桁を超える値は拒否する。
+    """
+    try:
+        d = Decimal(v)
+    except InvalidOperation:
+        raise ValueError(f"{name}: 数値を入力してください（入力: {raw}）") from None
+    if not d.is_finite():
+        raise ValueError(f"{name}: 有限の数値を入力してください（入力: {raw}）")
+    sign, digits, exp = d.as_tuple()
+    int_digits = max(len(digits) + exp, 1)
+    frac_digits = max(-exp, 0)
+    if int_digits + frac_digits > MAX_NUMBER_DIGITS:
+        raise ValueError(f"{name}: 桁数が多すぎます（{MAX_NUMBER_DIGITS} 桁まで。入力: {raw}）")
+    text = format(d, "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    if text in ("-0", "+0", ""):
+        text = "0"
+    return text
+
+
 def normalize_value(defn: PropertyDef, raw) -> str | None:
     """型に合わせて値を検証・正規化する。空なら None。不正なら ValueError。"""
     if raw is None:
@@ -244,8 +273,7 @@ def normalize_value(defn: PropertyDef, raw) -> str | None:
         v = value.replace(",", "")
         if not _NUMBER.match(v):
             raise ValueError(f"{defn.name}: 数値を入力してください（入力: {value}）")
-        n = float(v)
-        return str(int(n)) if n.is_integer() and "e" not in v.lower() and "." not in v else str(n)
+        return _normalize_number(defn.name, value, v)
     if t == "date":
         try:
             return date.fromisoformat(value).isoformat()
