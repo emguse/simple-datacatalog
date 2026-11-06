@@ -93,3 +93,25 @@ def test_v4_db_gets_asset_status(tmp_path):
     assert tuple(conn.execute("SELECT name, status FROM assets").fetchone()) == ("a", "運用中")
     with pytest.raises(sqlite3.IntegrityError):  # 移行後も CHECK 制約が効く
         conn.execute("UPDATE assets SET status = '不明'")
+
+
+def test_v5_db_gets_metrics(tmp_path):
+    """v5（指標・ビジネスプロセスがない）DB を、データを残したまま v6 に上げる。"""
+    from catalog import repository as repo
+    from catalog.ingest import ColumnSchema, FileSchema
+
+    path = tmp_path / "catalog.db"
+    conn = open_db(path)
+    admin = auth.create_first_admin(conn, "admin", "", "admin-password")
+    repo.register_asset(conn, admin, "a", "a.csv", FileSchema("csv", 1, [ColumnSchema("x", "int64")]))
+    for table in ("metric_questions", "metric_assets", "metrics", "business_processes"):
+        conn.execute(f"DROP TABLE {table}")
+    conn.execute("PRAGMA user_version = 5")
+    conn.close()
+
+    assert init_db(path) is None  # 退避しない
+    conn = open_db(path)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert conn.execute("SELECT name FROM assets").fetchone()[0] == "a"
+    assert conn.execute("SELECT COUNT(*) FROM metrics").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM business_processes").fetchone()[0] == 0

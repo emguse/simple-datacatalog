@@ -61,6 +61,7 @@ else:
     catalog_pages = [
         st.Page("pages/0_ホーム.py", title="ホーム", icon="📚", url_path="home", default=True),
         st.Page("pages/10_問い.py", title="問い", icon="❓", url_path="questions"),
+        st.Page("pages/11_指標.py", title="指標", icon="📈", url_path="metrics"),
         st.Page("pages/2_アセット詳細.py", title="アセット詳細", icon="📝", url_path="detail"),
         st.Page("pages/3_リネージ.py", title="リネージ", icon="🔀", url_path="lineage"),
         st.Page("pages/7_ドメイン.py", title="ドメイン", icon="🏷️", url_path="domains"),

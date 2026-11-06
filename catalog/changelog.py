@@ -18,6 +18,9 @@ ENTITY_LABELS = {
     "user": "ユーザー",
     "domain": "ドメイン",
     "role": "役割",
+    "question": "問い",
+    "metric": "指標",
+    "business_process": "ビジネスプロセス",
 }
 ACTION_LABELS = {
     "create": "作成",

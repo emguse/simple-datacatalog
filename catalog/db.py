@@ -18,8 +18,8 @@ DEFAULT_DB_PATH = Path(
 # スキーマの版。
 # - UPGRADABLE_FROM の版: その場で上げる（データは残る）。MIGRATIONS の手順を古い順に流してから SCHEMA を実行する
 # - それ以外の古い版: 退避して作り直す（データは引き継がない）
-SCHEMA_VERSION = 5
-UPGRADABLE_FROM = {2, 3, 4}
+SCHEMA_VERSION = 6
+UPGRADABLE_FROM = {2, 3, 4, 5}
 # MIGRATIONS[v]: 版 v から v+1 に上げるために足す列 (テーブル, 列, 定義)。
 # 新しいテーブルは SCHEMA の CREATE TABLE IF NOT EXISTS で作られる。列が既にあれば何もしない（何度流してもよい）
 MIGRATIONS: dict[int, list[tuple[str, str, str]]] = {
@@ -31,9 +31,10 @@ MIGRATIONS: dict[int, list[tuple[str, str, str]]] = {
     4: [  # v4 → v5: アセットにステータスを追加（既存のアセットは運用中になる）
         ("assets", "status", "TEXT NOT NULL DEFAULT '運用中' CHECK (status IN ('運用中', '非推奨', '廃止'))"),
     ],
+    5: [],  # v5 → v6: ビジネスプロセスと指標（business_processes, metrics, metric_assets, metric_questions）を追加（CREATE のみ）
 }
 
-log = logging.getLogger(__name__)
+log =logging.getLogger(__name__)
 
 SCHEMA = """
 -- ドメイン: オーナーを設定する基本の単位。アセットはドメインの割り当てを継承する
@@ -205,6 +206,43 @@ CREATE TABLE IF NOT EXISTS question_assets (
     PRIMARY KEY (question_id, asset_id)
 );
 CREATE INDEX IF NOT EXISTS idx_question_assets_asset ON question_assets (asset_id);
+
+-- ビジネスプロセス: 指標の起点となる業務の流れ（受注、出荷、請求など）。ドメイン（オーナー継承の単位）とは別物
+CREATE TABLE IF NOT EXISTS business_processes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- 指標: 登録に必須なのは name だけ。計算式は文章（カラム単位の計算式はアセット／カラムの説明に書く）
+CREATE TABLE IF NOT EXISTS metrics (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    code                TEXT NOT NULL UNIQUE,            -- M-001 形式（自動採番）
+    name                TEXT NOT NULL,
+    business_process_id INTEGER REFERENCES business_processes(id) ON DELETE SET NULL,
+    description         TEXT NOT NULL DEFAULT '',
+    formula             TEXT NOT NULL DEFAULT '',
+    unit                TEXT NOT NULL DEFAULT '',
+    grain               TEXT NOT NULL DEFAULT '',        -- 集計粒度（例: 日次×店舗）
+    created_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS metric_assets (
+    metric_id INTEGER NOT NULL REFERENCES metrics(id) ON DELETE CASCADE,
+    asset_id  INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+    PRIMARY KEY (metric_id, asset_id)
+);
+CREATE INDEX IF NOT EXISTS idx_metric_assets_asset ON metric_assets (asset_id);
+
+CREATE TABLE IF NOT EXISTS metric_questions (
+    metric_id   INTEGER NOT NULL REFERENCES metrics(id) ON DELETE CASCADE,
+    question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+    PRIMARY KEY (metric_id, question_id)
+);
+CREATE INDEX IF NOT EXISTS idx_metric_questions_question ON metric_questions (question_id);
 """
 
 
