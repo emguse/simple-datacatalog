@@ -72,9 +72,11 @@ with st.expander(f"ビジネスプロセス（{len(bp_list)}）"):
                     st.session_state["m_flash"] = f"ビジネスプロセス「{n.strip()}」を追加しました"
                     st.rerun()
         if bp_list:
-            with st.form(f"bp_edit_{gen}"):
-                target = st.selectbox("編集・削除するビジネスプロセス", list(bp_names), format_func=bp_names.get)
-                cur = next(b for b in bp_list if b["id"] == target)
+            # 選択はフォームの外に置く（フォーム内だと選び直しても入力欄が切り替わらず、保存時に別の行の値で上書きされる）
+            target = st.selectbox("編集・削除するビジネスプロセス", list(bp_names), format_func=bp_names.get,
+                                  key="bp_edit_target")
+            cur = next(b for b in bp_list if b["id"] == target)
+            with st.form(f"bp_edit_{gen}_{target}"):
                 new_name = st.text_input("名前", value=cur["name"], key=f"bp_name_{target}")
                 new_desc = st.text_area("説明", value=cur["description"], key=f"bp_desc_{target}", height=100)
                 c1, c2 = st.columns(2)
@@ -90,6 +92,7 @@ with st.expander(f"ビジネスプロセス（{len(bp_list)}）"):
                             st.session_state["m_flash"] = "保存しました"
                         else:
                             bps.delete_business_process(conn, user, target)
+                            st.session_state.pop("bp_edit_target", None)  # 消えた行を選択したままにしない
                             st.session_state["m_flash"] = f"「{cur['name']}」を削除しました"
                     except (ValueError, PermissionError) as e:
                         st.error(str(e))
