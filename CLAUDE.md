@@ -8,7 +8,7 @@ A small data catalog (Python + Streamlit + SQLite, single process) for registeri
 
 ## Architecture
 
-**Layers**: `pages/*.py` (Streamlit UI) → `catalog/ui.py` (shared widgets/helpers) → domain modules in `catalog/` (`repository`, `properties`, `roles`, `questions`, `lineage`, `auth`, `changelog`) → `catalog/db.py` / `catalog/tx.py`. Domain modules never import Streamlit; keep business rules there so they are testable.
+**Layers**: `pages/*.py` (Streamlit UI) → `catalog/ui.py` (shared widgets/helpers) → domain modules in `catalog/` (`repository`, `properties`, `roles`, `questions`, `metrics`, `business_processes`, `lineage`, `auth`, `changelog`) → `catalog/db.py` / `catalog/tx.py`. Domain modules never import Streamlit; keep business rules there so they are testable.
 
 **Write path conventions (follow these for any new write function):**
 - Every write function takes `actor: User` and calls `auth.require(actor, Perm.X)` first. Permission levels: `VIEW < EDIT (editor) < MANAGE_ASSETS (power) < ADMIN`.
@@ -29,6 +29,7 @@ A small data catalog (Python + Streamlit + SQLite, single process) for registeri
 - Asset status (`asset_status.py`, `assets.status`): 運用中 / 非推奨 / 廃止. It drives behaviour, so it is a fixed-value column rather than a property (admins can rename property choices). Changing it requires `MANAGE_ASSETS`. Retired assets are hidden from the home default, skipped by `incomplete_only`, and not suggested for questions; dependencies on non-active assets produce warnings (`repository.status_warnings`, `questions.hints`), never errors.
 - Completeness (`properties.completeness`) = description + required properties + owner scope coverage + at least one steward. "No questions" is intentionally **not** part of completeness; it's shown as a separate soft indicator.
 - Questions (`questions.py`): only the text is required. Missing details become `hints()` (nudges, never errors). Asset suggestions use character-bigram overlap (no morphological analysis).
+- Metrics (`metrics.py`, `business_processes.py`): only the name is required; many-to-many to assets and questions; textual `formula` only (column-level formulas stay in descriptions — YAGNI). `business_processes` is separate from `domains` (domains are the owner-inheritance unit). Metric `business_process_id` is cleared by passing `0` (since `None` means "unchanged"). Deleting a business process sets its metrics' value to NULL.
 
 **Schema changes** (`catalog/db.py`): `SCHEMA` uses `CREATE ... IF NOT EXISTS`. Bump `SCHEMA_VERSION`, add the old version to `UPGRADABLE_FROM`, and list added columns in `MIGRATIONS[old_version]` (applied idempotently before `SCHEMA` runs). DBs at versions not in `UPGRADABLE_FROM` are backed up to `catalog.db.bak-<timestamp>` and recreated empty. Add a test in `tests/test_db.py` for each upgrade path.
 

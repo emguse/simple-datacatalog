@@ -437,3 +437,19 @@ def question_line(q: dict, link: bool = True) -> None:
     c1.markdown(f"**{q['code']}** {q['text']}　{question_badges(q)}")
     if link:
         c2.page_link(QUESTIONS_PAGE, label="開く", icon="❓", query_params={"q": q["id"]})
+
+
+# ---------------------------------------------------------------- 指標
+
+METRICS_PAGE = "pages/11_指標.py"
+
+
+def metric_line(m: dict, link: bool = True) -> None:
+    """指標を1行で表示する（番号・名前・ビジネスプロセス・単位）。link=True なら指標ページへのリンクを付ける。"""
+    c1, c2 = st.columns([5, 1])
+    badges = [f":blue-badge[{m['business_process']}]"] if m.get("business_process") else []
+    if m["unit"]:
+        badges.append(f":gray-badge[{m['unit']}]")
+    c1.markdown(f"**{m['code']}** {m['name']}　{' '.join(badges)}")
+    if link:
+        c2.page_link(METRICS_PAGE, label="開く", icon="📈", query_params={"m": m["id"]})

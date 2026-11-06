@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from catalog import auth, changelog, roles
+from catalog import metrics as ms
 from catalog import questions as qs
 from catalog import properties as props
 from catalog import repository as repo
@@ -20,6 +21,7 @@ from catalog.ingest import SUPPORTED_EXTENSIONS, infer_schema, preview
 from catalog.ui import (
     DOMAIN_PAGE,
     LINEAGE_PAGE,
+    METRICS_PAGE,
     QUESTIONS_PAGE,
     FormSnapshot,
     asset_options,
@@ -33,6 +35,7 @@ from catalog.ui import (
     schema_table,
     selected_asset_id,
     discard_upload,
+    metric_line,
     stage_upload,
     store_upload,
 )
@@ -190,6 +193,26 @@ if downstream := qs.downstream_questions(conn, asset_id):
         for q in downstream:
             st.markdown(f"- **{q['code']}** {q['text']}　← {'、'.join(q['via'])}")
 st.page_link(QUESTIONS_PAGE, label="問いの一覧へ", icon="❓")
+
+# ---- このデータから算出される指標
+st.subheader("このデータから算出される指標")
+metrics_here = ms.metrics_for_asset(conn, asset_id)
+for m in metrics_here:
+    metric_line(m)
+if not metrics_here:
+    st.caption("このデータを元にした指標はまだありません。")
+if can_edit:
+    others_m = {m["id"]: f"{m['code']} {m['name']}" for m in ms.list_metrics(conn)
+                if m["id"] not in {x["id"] for x in metrics_here}}
+    if others_m:
+        with st.expander("既存の指標にこのデータを紐づける"):
+            with st.form(f"m_link_{asset_id}"):
+                pick_m = st.multiselect("指標", list(others_m), format_func=others_m.get)
+                if st.form_submit_button("紐づける") and pick_m:
+                    for mid in pick_m:
+                        ms.link_assets(conn, user, mid, add=[asset_id])
+                    saved(f"{len(pick_m)} 件の指標に紐づけました")
+st.page_link(METRICS_PAGE, label="指標の一覧へ", icon="📈")
 
 # ---- プロパティ
 st.subheader("プロパティ")
