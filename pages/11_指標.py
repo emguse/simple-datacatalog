@@ -73,31 +73,42 @@ with st.expander(f"ビジネスプロセス（{len(bp_list)}）"):
                     st.rerun()
         if bp_list:
             # 選択はフォームの外に置く（フォーム内だと選び直しても入力欄が切り替わらず、保存時に別の行の値で上書きされる）
+            if st.session_state.get("bp_edit_target") not in bp_names:  # 他の人が消した行を選んだままにしない
+                st.session_state.pop("bp_edit_target", None)
             target = st.selectbox("編集・削除するビジネスプロセス", list(bp_names), format_func=bp_names.get,
                                   key="bp_edit_target")
-            cur = next(b for b in bp_list if b["id"] == target)
-            with st.form(f"bp_edit_{gen}_{target}"):
-                new_name = st.text_input("名前", value=cur["name"], key=f"bp_name_{target}")
-                new_desc = st.text_area("説明", value=cur["description"], key=f"bp_desc_{target}", height=100)
-                c1, c2 = st.columns(2)
-                save = c1.form_submit_button("保存")
-                delete = c2.form_submit_button(f"削除（指標 {cur['metric_count']} 件は未設定に戻ります）")
-                if save or delete:
-                    try:
-                        if save:
-                            changed = {f: v for f, v in (("name", new_name), ("description", new_desc))
-                                       if v.strip() != cur[f]}
-                            if changed:
-                                bps.update_business_process(conn, user, target, **changed)
-                            st.session_state["m_flash"] = "保存しました"
+            bp_snap = FormSnapshot("business_process", target, lambda: bps.get_business_process(conn, target))
+            cur = bp_snap.values
+            if cur is None:
+                st.warning("このビジネスプロセスは削除されています。")
+                bp_snap.reset()
+            else:
+                bp_snap.stale_notice()
+                n_metrics = next((b["metric_count"] for b in bp_list if b["id"] == target), 0)
+                with st.form(bp_snap.wkey("form")):
+                    new_name = st.text_input("名前", value=cur["name"], key=bp_snap.wkey("name"))
+                    new_desc = st.text_area("説明", value=cur["description"], key=bp_snap.wkey("desc"), height=100)
+                    c1, c2 = st.columns(2)
+                    save = c1.form_submit_button("保存")
+                    delete = c2.form_submit_button(f"削除（指標 {n_metrics} 件は未設定に戻ります）")
+                    if save or delete:
+                        try:
+                            if save:
+                                # 開いた時点の値と比べ、自分が変えた項目だけを送る
+                                changed = {f: v for f, v in (("name", new_name), ("description", new_desc))
+                                           if v.strip() != cur[f]}
+                                if changed:
+                                    bps.update_business_process(conn, user, target, **changed)
+                                st.session_state["m_flash"] = "保存しました"
+                            else:
+                                bps.delete_business_process(conn, user, target)
+                                st.session_state.pop("bp_edit_target", None)  # 消えた行を選択したままにしない
+                                st.session_state["m_flash"] = f"「{cur['name']}」を削除しました"
+                        except (ValueError, PermissionError) as e:
+                            st.error(str(e))
                         else:
-                            bps.delete_business_process(conn, user, target)
-                            st.session_state.pop("bp_edit_target", None)  # 消えた行を選択したままにしない
-                            st.session_state["m_flash"] = f"「{cur['name']}」を削除しました"
-                    except (ValueError, PermissionError) as e:
-                        st.error(str(e))
-                    else:
-                        st.rerun()
+                            bp_snap.reset()
+                            st.rerun()
     else:
         st.caption("ビジネスプロセスの追加・編集はパワーユーザー以上が行えます。")
 
